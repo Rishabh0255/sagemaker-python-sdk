@@ -33089,6 +33089,10 @@
         "MaxResults":{
           "shape":"MaxResults",
           "documentation":"<p>The maximum number of pipelines to return in the response.</p>"
+        },
+        "System":{
+          "shape":"Boolean",
+          "documentation":"<p>If true, lists system pipelines (AWS-managed). If false or not specified, lists customer-managed pipelines.</p>"
         }
       }
     },

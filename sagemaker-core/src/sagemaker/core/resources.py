@@ -26897,6 +26897,7 @@ class Pipeline(Base):
         created_before: Optional[datetime.datetime] = Unassigned(),
         sort_by: Optional[StrPipeVar] = Unassigned(),
         sort_order: Optional[StrPipeVar] = Unassigned(),
+        system: Optional[bool] = Unassigned(),
         session: Optional[Session] = None,
         region: Optional[StrPipeVar] = None,
     ) -> ResourceIterator["Pipeline"]:
@@ -26909,6 +26910,7 @@ class Pipeline(Base):
             created_before: A filter that returns the pipelines that were created before a specified time.
             sort_by: The field by which to sort results. The default is CreatedTime.
             sort_order: The sort order for results.
+            system: If true, lists system pipelines (AWS-managed). If false or not specified, lists customer-managed pipelines.
             next_token: If the result of the previous ListPipelines request was truncated, the response includes a NextToken. To retrieve the next set of pipelines, use the token in the next request.
             max_results: The maximum number of pipelines to return in the response.
             session: Boto3 session.
@@ -26937,6 +26939,7 @@ class Pipeline(Base):
             'CreatedBefore': created_before,
             'SortBy': sort_by,
             'SortOrder': sort_order,
+            'System': system,
         }
     
         # serialize the input request

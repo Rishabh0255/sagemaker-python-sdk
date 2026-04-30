@@ -385,6 +385,7 @@ sagemaker.html#SageMaker.Client.describe_pipeline>`_
         selective_execution_config: SelectiveExecutionConfig = None,
         mlflow_experiment_name: str = None,
         pipeline_version_id: int = None,
+        role_arn: str = None,
     ):
         """Starts a Pipeline execution in the Workflow service.
 
@@ -404,6 +405,9 @@ sagemaker.html#SageMaker.Client.describe_pipeline>`_
                 pipeline execution only, without modifying the pipeline definition.
             pipeline_version_id (Optional[str]): version ID of the pipeline to start the execution from. If not
                 specified, uses the latest version ID.
+            role_arn (str): The ARN of the IAM role to use for the execution. Required for
+                system pipelines, which do not have a role associated with the pipeline itself.
+                Must not be provided for customer-managed pipelines.
 
         Returns:
             A `PipelineExecution` instance, if successful.
@@ -427,6 +431,7 @@ sagemaker.html#SageMaker.Client.describe_pipeline>`_
             SelectiveExecutionConfig=selective_execution_config,
             MlflowExperimentName=mlflow_experiment_name,
             PipelineVersionId=pipeline_version_id,
+            RoleArn=role_arn,
         )
         if self.sagemaker_session.local_mode:
             update_args(kwargs, PipelineParameters=parameters)

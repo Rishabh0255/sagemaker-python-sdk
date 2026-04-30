@@ -524,3 +524,23 @@ def test_get_function_step_result_obsolete_s3_path(mock_session):
     with patch("sagemaker.mlops.workflow.pipeline.deserialize_obj_from_s3", return_value="result"):
         result = get_function_step_result("step1", step_list, "exec-id", mock_session)
         assert result == "result"
+
+
+def test_pipeline_start_with_role_arn(mock_session, mock_step):
+    pipeline = Pipeline(name="test-pipeline", steps=[mock_step], sagemaker_session=mock_session)
+    mock_session.sagemaker_client.start_pipeline_execution.return_value = {"PipelineExecutionArn": "arn"}
+
+    pipeline.start(role_arn="arn:aws:iam::123456789012:role/TestRole")
+
+    call_kwargs = mock_session.sagemaker_client.start_pipeline_execution.call_args[1]
+    assert call_kwargs["RoleArn"] == "arn:aws:iam::123456789012:role/TestRole"
+
+
+def test_pipeline_start_without_role_arn_does_not_send_it(mock_session, mock_step):
+    pipeline = Pipeline(name="test-pipeline", steps=[mock_step], sagemaker_session=mock_session)
+    mock_session.sagemaker_client.start_pipeline_execution.return_value = {"PipelineExecutionArn": "arn"}
+
+    pipeline.start()
+
+    call_kwargs = mock_session.sagemaker_client.start_pipeline_execution.call_args[1]
+    assert "RoleArn" not in call_kwargs
