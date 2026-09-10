@@ -219,9 +219,11 @@ class Record(ApiObject):
         )
         return self
 
-    # Lineage entity creation methods whose requests are captured as pipeline
-    # step arguments when invoked under a ``PipelineSession`` (instead of
-    # calling the service). Used by ``sagemaker.mlops.workflow.LineageStep``.
+    # Lineage entity creation methods that participate in pipeline step
+    # composition. Requests for these are routed through the session's
+    # ``_intercept_create_request`` seam, so a ``PipelineSession`` captures them
+    # as step arguments while a plain ``Session`` calls the service. Used by
+    # ``sagemaker.mlops.workflow.LineageStep``.
     _PIPELINE_CAPTURABLE_METHODS = frozenset(
         {"create_action", "create_artifact", "create_context", "add_association"}
     )
@@ -231,17 +233,13 @@ class Record(ApiObject):
         api_values = {k: v for k, v in vars(self).items() if k in boto_method_members}
         api_kwargs = self.to_boto(api_values)
 
+        def submit(request):
+            api_method = getattr(self.sagemaker_session.sagemaker_client, boto_method)
+            return self.with_boto(api_method(**request))
+
         if boto_method in self._PIPELINE_CAPTURABLE_METHODS:
-            # Lazy import to avoid a circular dependency at module load time.
-            from sagemaker.core.workflow.pipeline_context import (
-                PipelineSession,
-                _JobStepArguments,
+            return self.sagemaker_session._intercept_create_request(
+                api_kwargs, submit, boto_method
             )
 
-            if isinstance(self.sagemaker_session, PipelineSession):
-                self.sagemaker_session.context = _JobStepArguments(boto_method, api_kwargs)
-                return self.sagemaker_session.context
-
-        api_method = getattr(self.sagemaker_session.sagemaker_client, boto_method)
-        api_boto_response = api_method(**api_kwargs)
-        return self.with_boto(api_boto_response)
+        return submit(api_kwargs)

@@ -1101,12 +1101,9 @@ class Session(object):  # pylint: disable=too-many-public-methods
                 live_logging=live_logging,
             )
 
-        result = self._intercept_create_request(
+        return self._intercept_create_request(
             config_options, submit, self.endpoint_from_production_variants.__name__
         )
-        if self._is_pipeline_context():
-            return self.context
-        return result
 
     def create_endpoint(self, endpoint_name, config_name, tags=None, wait=True, live_logging=False):
         """Create an Amazon SageMaker ``Endpoint`` according to the configuration in the request.
@@ -1151,12 +1148,9 @@ class Session(object):  # pylint: disable=too-many-public-methods
             return endpoint_name
 
         try:
-            result = self._intercept_create_request(
+            return self._intercept_create_request(
                 create_endpoint_request, submit, self.create_endpoint.__name__
             )
-            if self._is_pipeline_context():
-                return self.context
-            return result
         except Exception as e:
             troubleshooting = (
                 "https://docs.aws.amazon.com/sagemaker/latest/dg/"
@@ -1280,12 +1274,9 @@ class Session(object):  # pylint: disable=too-many-public-methods
                 self.wait_for_inference_component(inference_component_name)
             return inference_component_name
 
-        result = self._intercept_create_request(
+        return self._intercept_create_request(
             request, submit, self.create_inference_component.__name__
         )
-        if self._is_pipeline_context():
-            return self.context
-        return result
 
     def wait_for_inference_component(self, inference_component_name, poll=20):
         """Wait for an Amazon SageMaker ``Inference Component`` deployment to complete.
@@ -1463,19 +1454,6 @@ class Session(object):  # pylint: disable=too-many-public-methods
             func_name (str): the name of the function needed intercepting
         """
         return create(request)
-
-    def _is_pipeline_context(self) -> bool:
-        """Whether this session is a pipeline session capturing requests.
-
-        Producer methods that support composing pipeline steps use this to
-        return the captured step arguments (``self.context``) instead of the
-        result of a service call. Always ``False`` for a plain ``Session``.
-        """
-        # Lazy import to avoid a circular dependency: pipeline_context imports
-        # from this module at import time.
-        from sagemaker.core.workflow.pipeline_context import PipelineSession
-
-        return isinstance(self, PipelineSession)
 
     def _create_inference_recommendations_job_request(
         self,

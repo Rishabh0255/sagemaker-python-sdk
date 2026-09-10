@@ -51,7 +51,11 @@ from sagemaker.mlops.workflow.endpoint_step import EndpointConfigStep, EndpointS
 from sagemaker.mlops.workflow.fail_step import FailStep
 from sagemaker.mlops.workflow.inference_component_step import InferenceComponentStep
 from sagemaker.mlops.workflow.lambda_step import LambdaStep, LambdaOutput
-from sagemaker.mlops.workflow.lineage_step import LineageStep
+from sagemaker.mlops.workflow.lineage_step import (
+    LineageAssociation,
+    LineageEntityReference,
+    LineageStep,
+)
 from sagemaker.mlops.workflow.model_step import ModelStep
 from sagemaker.mlops.workflow.monitor_batch_transform_step import MonitorBatchTransformStep
 from sagemaker.mlops.workflow.notebook_job_step import NotebookJobStep
@@ -108,6 +112,8 @@ __all__ = [
     "InferenceComponentStep",
     "LambdaStep",
     "LambdaOutput",
+    "LineageAssociation",
+    "LineageEntityReference",
     "LineageStep",
     "ModelStep",
     "MonitorBatchTransformStep",

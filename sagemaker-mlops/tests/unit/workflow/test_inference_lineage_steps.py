@@ -32,7 +32,11 @@ from sagemaker.core.lineage.action import Action
 from sagemaker.core.lineage.artifact import Artifact
 from sagemaker.core.lineage.association import Association
 from sagemaker.core.lineage.context import Context
-from sagemaker.mlops.workflow.lineage_step import LineageStep
+from sagemaker.mlops.workflow.lineage_step import (
+    LineageAssociation,
+    LineageEntityReference,
+    LineageStep,
+)
 from sagemaker.mlops.workflow.retry import (
     StepExceptionTypeEnum,
     StepRetryPolicy,
@@ -284,21 +288,145 @@ def test_lineage_step_context(pipeline_session):
     assert step.arguments["Contexts"][0]["ContextName"] == "ctx1"
 
 
-def test_lineage_step_association_translates_arns(pipeline_session, action_step_args):
-    action_step = LineageStep(name="RecA", step_args=action_step_args)
-    step_args = Association.create(
-        source_arn=action_step.properties.ActionArns["act1"],
-        destination_arn="arn:aws:sagemaker:us-west-2:123456789012:artifact/abc",
+def test_lineage_step_batches_multiple_entities(pipeline_session):
+    """One step carries Actions, Artifacts and Contexts together."""
+    actions = [
+        Action.create(
+            action_name=f"act{i}",
+            source_uri="s3://bucket/run",
+            source_type="S3ETag",
+            action_type="ModelTraining",
+            sagemaker_session=pipeline_session,
+        )
+        for i in range(2)
+    ]
+    artifact = Artifact.create(
+        artifact_name="art1",
+        source_uri="s3://bucket/model.tar.gz",
+        artifact_type="Model",
+        sagemaker_session=pipeline_session,
+    )
+    context = Context.create(
+        context_name="ctx1",
+        source_uri="s3://bucket/ctx",
+        context_type="Endpoint",
+        sagemaker_session=pipeline_session,
+    )
+
+    step = LineageStep(name="Rec", step_args=actions + [artifact, context])
+    args = step.arguments
+
+    assert [a["ActionName"] for a in args["Actions"]] == ["act0", "act1"]
+    assert [a["ArtifactName"] for a in args["Artifacts"]] == ["art1"]
+    assert [c["ContextName"] for c in args["Contexts"]] == ["ctx1"]
+    assert "Associations" not in args
+    assert not pipeline_session.sagemaker_client.create_action.called
+    assert not pipeline_session.sagemaker_client.create_artifact.called
+    assert not pipeline_session.sagemaker_client.create_context.called
+
+
+def test_lineage_step_association_references_sibling_by_name_and_type(pipeline_session):
+    """Associations reference same-step entities by Name+Type, not by ARN."""
+    action = Action.create(
+        action_name="act1",
+        source_uri="s3://bucket/run",
+        source_type="S3ETag",
+        action_type="ModelTraining",
+        sagemaker_session=pipeline_session,
+    )
+    artifact = Artifact.create(
+        artifact_name="art1",
+        source_uri="s3://bucket/model.tar.gz",
+        artifact_type="Model",
+        sagemaker_session=pipeline_session,
+    )
+    step = LineageStep(
+        name="Rec",
+        step_args=[action, artifact],
+        associations=[
+            LineageAssociation(
+                source=LineageEntityReference(name="act1", type="Action"),
+                destination=LineageEntityReference(name="art1", type="Artifact"),
+                association_type="Produced",
+            )
+        ],
+    )
+
+    association = step.arguments["Associations"][0]
+    assert association["Source"] == {"Name": "act1", "Type": "Action"}
+    assert association["Destination"] == {"Name": "art1", "Type": "Artifact"}
+    assert association["AssociationType"] == "Produced"
+    assert not pipeline_session.sagemaker_client.add_association.called
+
+
+def test_lineage_step_association_accepts_literal_arn(pipeline_session, action_step_args):
+    """A pre-existing entity is referenced by ARN."""
+    existing = "arn:aws:sagemaker:us-west-2:123456789012:artifact/abc"
+    step = LineageStep(
+        name="Rec",
+        step_args=action_step_args,
+        associations=[
+            LineageAssociation(
+                source=LineageEntityReference(name="act1", type="Action"),
+                destination=LineageEntityReference(arn=existing),
+                association_type="Produced",
+            )
+        ],
+    )
+    assert step.arguments["Associations"][0]["Destination"] == {"Arn": existing}
+
+
+def test_lineage_step_rejects_unresolvable_sibling_reference(action_step_args):
+    """A Name+Type reference this step does not create fails at construction.
+
+    The service resolves Name+Type only against entities created by the same
+    step, and would otherwise fail the execution at runtime.
+    """
+    with pytest.raises(ValueError, match="does not create"):
+        LineageStep(
+            name="Rec",
+            step_args=action_step_args,
+            associations=[
+                LineageAssociation(
+                    source=LineageEntityReference(name="act1", type="Action"),
+                    destination=LineageEntityReference(name="ghost", type="Artifact"),
+                )
+            ],
+        )
+
+
+def test_lineage_step_rejects_captured_association(pipeline_session, action_step_args):
+    """Association.create() cannot express a sibling, so it is not valid step_args."""
+    captured = Association.create(
+        source_arn="arn:aws:sagemaker:us-west-2:123456789012:action/a",
+        destination_arn="arn:aws:sagemaker:us-west-2:123456789012:artifact/b",
         association_type="Produced",
         sagemaker_session=pipeline_session,
     )
-    step = LineageStep(name="RecD", step_args=step_args, depends_on=[action_step])
-    entity = step.arguments["Associations"][0]
-    # AddAssociation's SourceArn/DestinationArn become entity references.
-    assert entity["Source"]["Arn"].expr == {"Get": "Steps.RecA.ActionArns['act1']"}
-    assert entity["Destination"] == {"Arn": "arn:aws:sagemaker:us-west-2:123456789012:artifact/abc"}
-    assert entity["AssociationType"] == "Produced"
-    assert not pipeline_session.sagemaker_client.add_association.called
+    with pytest.raises(ValueError, match="associations argument"):
+        LineageStep(name="Rec", step_args=[action_step_args, captured])
+
+
+def test_lineage_step_requires_an_entity_or_association():
+    with pytest.raises(ValueError, match="at least one entity"):
+        LineageStep(name="Rec")
+
+
+def test_lineage_entity_reference_validation():
+    with pytest.raises(ValueError, match="not both"):
+        LineageEntityReference(name="a", type="Action", arn="arn:x")
+    with pytest.raises(ValueError, match="both name and type"):
+        LineageEntityReference(name="a")
+    with pytest.raises(ValueError, match="Unsupported lineage entity type"):
+        LineageEntityReference(name="a", type="Endpoint")
+
+
+def test_lineage_association_rejects_non_reference_endpoint():
+    with pytest.raises(TypeError, match="LineageEntityReference"):
+        LineageAssociation(
+            source="arn:aws:sagemaker:us-west-2:123456789012:action/a",
+            destination=LineageEntityReference(arn="arn:x"),
+        )
 
 
 def test_lineage_step_rejects_wrong_producer(endpoint_step_args):
@@ -316,6 +444,56 @@ def test_lineage_step_properties(action_step_args):
     for field in ("ActionArns", "ArtifactArns", "ContextArns", "Associations"):
         assert hasattr(step.properties, field)
     assert step.properties.ArtifactArns["x"].expr == {"Get": "Steps.Rec.ArtifactArns['x']"}
+
+
+def test_all_four_producers_route_through_the_intercept_seam(pipeline_session):
+    """Every step's capture goes through PipelineSession._intercept_create_request.
+
+    Guards against re-introducing a second capture mechanism: the seam is the
+    only path, so patching it is enough to observe all four producers.
+    """
+    seen = []
+    real = pipeline_session._intercept_create_request
+
+    def record(request, create, func_name=None):
+        seen.append(func_name)
+        return real(request, create, func_name)
+
+    pipeline_session._intercept_create_request = record
+
+    pipeline_session.endpoint_from_production_variants(
+        name="cfg",
+        production_variants=[{"VariantName": "AllTraffic"}],
+        role="arn:aws:iam::123456789012:role/SageMakerRole",
+    )
+    pipeline_session.create_endpoint(endpoint_name="ep", config_name="cfg")
+    pipeline_session.create_inference_component(
+        inference_component_name="ic",
+        endpoint_name="ep",
+        variant_name="AllTraffic",
+        specification={"ModelName": "m"},
+    )
+    Action.create(
+        action_name="a",
+        source_uri="s3://b",
+        source_type="S3ETag",
+        action_type="T",
+        sagemaker_session=pipeline_session,
+    )
+
+    assert seen == [
+        "endpoint_from_production_variants",
+        "create_endpoint",
+        "create_inference_component",
+        "create_action",
+    ]
+
+
+def test_base_session_has_no_pipeline_branch():
+    """Base Session must stay pipeline-agnostic (no _is_pipeline_context helper)."""
+    from sagemaker.core.helper.session_helper import Session
+
+    assert not hasattr(Session, "_is_pipeline_context")
 
 
 def test_lineage_create_on_plain_session_calls_service():
